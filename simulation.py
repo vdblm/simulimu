@@ -1,5 +1,6 @@
 from collections import defaultdict
 import numpy as np
+from random_generator import exponential_sample
 
 
 class Queue:
@@ -17,7 +18,6 @@ class Queue:
         elif task.type == 2:
             self.queue2.append(task)
         else:
-            print(task.type)
             raise Exception('Task type undefined')
 
     def remove(self):
@@ -27,7 +27,7 @@ class Queue:
             return self.queue2.pop(0)
 
     def is_empty(self):
-        if len(self.queue2) is 0 and len(self.queue1) is 0:
+        if len(self.queue2) == 0 and len(self.queue1) == 0:
             return True
 
     def length(self):
@@ -57,7 +57,7 @@ class TimeServer:
         self.process_servers.append(process_server)
 
     def __start_task(self, task):
-        service_time = generate_service_time(self.rate)
+        service_time = generate_service_time(1 / self.rate)
         # set the task start time and service time
         self.done_time = task.simulation.time + service_time
         return task
@@ -76,6 +76,7 @@ class TimeServer:
         task = self.status
         if self.queue.is_empty():
             self.status = False
+            self.done_time = False
         else:
             self.status = self.__start_task(task=self.queue.remove())
 
@@ -86,9 +87,10 @@ class TimeServer:
         task.server = server
 
     def task_dead(self, task):
-        if self.status is task:
+        if self.status == task:
             if self.queue.is_empty():
                 self.status = False
+                self.done_time = False
             else:
                 self.status = self.__start_task(task=self.queue.remove())
         else:
@@ -96,8 +98,7 @@ class TimeServer:
 
 
 def generate_service_time(param):
-    # TODO different for timeserver and processerver
-    return 2
+    return max(1, int(exponential_sample(param)))
 
 
 class ProcessServer:
@@ -151,20 +152,39 @@ class Task:
         self.service_time = None
         self.server = server
         self.simulation = simulation
+        self.exit_time = None
 
     def done(self):
         self.is_done = True
+        self.exit_time = self.simulation.time
+        x1 = self.simulation.time_passed[self.type - 1][0] + 1
+        x2 = self.simulation.time_passed[self.type - 1][1] + self.exit_time - self.arrival_time
+        self.simulation.time_passed[self.type - 1] = (x1, x2)
+        self.simulation.n_exit += 1
         self.server.done_task(self)
 
     def start_service(self, service_time):
         self.service_time = service_time
         self.start_time = self.simulation.time
+        x1 = self.simulation.waiting_time[self.type - 1][0] + 1
+        x2 = self.simulation.waiting_time[self.type - 1][1] + self.start_time - self.arrival_time
+        self.simulation.waiting_time[self.type - 1] = (x1, x2)
         # add task to tasks_done_time dictionary in simulation
         self.simulation.tasks_done_time[self.start_time + self.service_time].append(self)
 
     def dead(self):
         if self.start_time is None:
             self.deadline_passed = True
+            self.simulation.passed_deadline[self.type - 1] += 1
+            self.exit_time = self.simulation.time
+            x1 = self.simulation.time_passed[self.type - 1][0] + 1
+            x2 = self.simulation.time_passed[self.type - 1][1] + self.exit_time - self.arrival_time
+            self.simulation.time_passed[self.type - 1] = (x1, x2)
+
+            x1 = self.simulation.waiting_time[self.type - 1][0] + 1
+            x2 = self.simulation.waiting_time[self.type - 1][1] + self.exit_time - self.arrival_time
+            self.simulation.waiting_time[self.type - 1] = (x1, x2)
+            self.simulation.n_exit += 1
         self.server.task_dead(self)
 
 
@@ -194,6 +214,12 @@ class Simulation:
 
         self.next_coming_task = 0
         self.next_type = 2
+
+        self.n_exit = 0
+
+        self.time_passed = [(0, 0), (0, 0)]
+        self.waiting_time = [(0, 0), (0, 0)]
+        self.passed_deadline = [0, 0]
 
     def set_time_server(self, time_server):
         """
@@ -227,7 +253,7 @@ class Simulation:
         we can sample an exponential r.v. as the inter-arrival when a new task comes
         """
         while not self.finished:
-            if self.time is self.next_coming_task:
+            if self.time == self.next_coming_task:
                 # add a new task
                 self.add_new_task()
 
@@ -237,26 +263,37 @@ class Simulation:
                 self.handle_dead_tasks(dead_tasks)
 
             # check for done tasks
-            if self.time_server.done_time is self.time:
+            if self.time_server.done_time == self.time:
                 self.time_server.done_task()
             if self.time in self.tasks_done_time:
                 done_tasks = self.tasks_done_time.pop(self.time)
                 self.handle_done_tasks(done_tasks)
 
             # TODO correct it
-            if self.time is 8:
+            if self.n_exit >= 500000:
                 self.finished = True
+                print('Total time avg type 1: ' + str(self.time_passed[0][1] / self.time_passed[0][0]))
+                print('Total time avg type 2: ' + str(self.time_passed[1][1] / self.time_passed[1][0]))
+                print('Total time avg: ' + str(
+                    (self.time_passed[1][1] + self.time_passed[0][1]) / (
+                            self.time_passed[0][0] + self.time_passed[1][0])))
+
+                print('Wait time avg type 1: ' + str(self.waiting_time[0][1] / self.waiting_time[0][0]))
+                print('Wait time avg type 2: ' + str(self.waiting_time[1][1] / self.waiting_time[1][0]))
+                print('Wait time avg: ' + str(
+                    (self.waiting_time[1][1] + self.waiting_time[0][1]) / (
+                            self.waiting_time[0][0] + self.waiting_time[1][0])))
+
+                print('deadline passed type 1: ' + str(self.passed_deadline[0]))
+                print('deadline passed type 2: ' + str(self.passed_deadline[1]))
 
             self.time += 1
 
     def generate_inter_arrival(self):
-        # TODO based on self.new_task_rate
-        # TODO make it integer!!
-        return 1, np.random.choice([1, 2])
+        return max(1, int(exponential_sample(1 / self.new_task_rate))), np.random.choice([1, 2], p=[0.1, 0.9])
 
     def generate_deadline(self):
-        # TODO should be done based on self.deadline_avg
-        return 4
+        return max(1, int(exponential_sample(self.deadline_avg)))
 
     def handle_dead_tasks(self, dead_tasks):
         for dead_task in dead_tasks:
@@ -286,4 +323,4 @@ if __name__ == '__main__':
         time_server.add_process_server(process_server)
 
     simulation.run_simulation()
-    print('hi')
+    print('Finished')
