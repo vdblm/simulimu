@@ -6,7 +6,7 @@ class Queue:
         self.queue1 = []
         self.queue2 = []
 
-    def enqueue(self, task):
+    def add_item(self, task):
         """
 
         :type task: Task
@@ -18,15 +18,25 @@ class Queue:
         else:
             raise Exception('Task type undefined')
 
-    def dequeue(self, task):
+    def remove(self):
         if len(self.queue1) > 0:
             return self.queue1.pop(0)
         else:
             return self.queue2.pop(0)
 
+    def is_empty(self):
+        if len(self.queue2) is 0 and len(self.queue1) is 0:
+            return True
+
+    def length(self):
+        return len(self.queue1) + len(self.queue2)
+
 
 class TimeServer:
-    def __init__(self, rate):
+    def init(self, rate, process_servers):
+        self.rate = rate
+        self.process_servers = process_servers
+        self.queue = Queue()
         """
 
         :param rate: poisson dist rate
@@ -34,15 +44,41 @@ class TimeServer:
         pass
 
     def add_task(self, task):
+        if self.queue.is_empty():
+            length = [i.queue.length() for i in self.process_servers]
+            self.process_servers[length.index(min(length))].add_task(task)
+        else:
+            self.queue.add_item(task)
         """
-
         :type task: Task
+        :return:
         """
 
 
 class ProcessServer:
-    def __init__(self):
-        pass
+    def init(self, number_of_processor, averages):
+        self.queue = Queue()
+        self.number_of_processor = number_of_processor
+        self.averages = averages
+        self.status = [False for i in range(self.number_of_processor)]
+
+    def add_task(self, task):
+        flag = False
+        for i in range(self.number_of_processor):
+            if not self.status[i] and not flag:
+                self.status[i] = task
+                flag = True
+        if not flag:
+            self.queue.add_item(task)
+
+    def done_task(self, task):
+        for i in range(self.number_of_processor):
+            if self.status[i] == task:
+                task.done()
+                if self.queue.is_empty():
+                    self.status[i] = False
+                else:
+                    self.status[i] = self.queue.remove()
 
 
 class Task:
@@ -60,6 +96,9 @@ class Task:
         self.start_time = None
         self.service_time = None
         self.server = None
+
+    def done(self):
+        self.is_done = True
 
 
 class Simulation:
