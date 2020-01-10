@@ -33,20 +33,25 @@ class Queue:
 
 
 class TimeServer:
-    def init(self, rate, process_servers):
+    def __init__(self, rate, process_servers):
         self.rate = rate
         self.process_servers = process_servers
         self.queue = Queue()
+        self.status = False
         """
 
         :param rate: poisson dist rate
         """
         pass
 
+    def __start_task(self, task):
+        service_time = generate_service_time(self.rate)
+        task.start_service(service_time)
+        return task
+
     def add_task(self, task):
         if self.queue.is_empty():
-            length = [i.queue.length() for i in self.process_servers]
-            self.process_servers[length.index(min(length))].add_task(task)
+            self.status = self.__start_task(task)
         else:
             self.queue.add_item(task)
         """
@@ -54,9 +59,24 @@ class TimeServer:
         :return:
         """
 
+    def done_task(self, task):
+        if self.queue.is_empty():
+            self.status = False
+        else:
+            self.status = self.__start_task(task=self.queue.remove())
+
+        length = [i.queue.length() for i in self.process_servers]
+        server = self.process_servers[length.index(min(length))]
+        server.add_task(task)
+        task.server = server
+
+
+def generate_service_time(param):
+    pass
+
 
 class ProcessServer:
-    def init(self, number_of_processor, averages):
+    def __init__(self, number_of_processor, averages):
         self.queue = Queue()
         self.number_of_processor = number_of_processor
         self.averages = averages
@@ -65,11 +85,16 @@ class ProcessServer:
     def add_task(self, task):
         flag = False
         for i in range(self.number_of_processor):
-            if not self.status[i] and not flag:
-                self.status[i] = task
+            if self.status[i] is False and not flag:
+                self.status[i] = self.__start_task(task, i)
                 flag = True
         if not flag:
             self.queue.add_item(task)
+
+    def __start_task(self, task, core_number):
+        service_time = generate_service_time(self.averages[core_number])
+        task.start_service(service_time)
+        return task
 
     def done_task(self, task):
         for i in range(self.number_of_processor):
@@ -78,11 +103,11 @@ class ProcessServer:
                 if self.queue.is_empty():
                     self.status[i] = False
                 else:
-                    self.status[i] = self.queue.remove()
+                    self.status[i] = self.__start_task(task=self.queue.remove(), core_number=i)
 
 
 class Task:
-    def __init__(self, type, arrival_time):
+    def __init__(self, type, arrival_time, deadline):
         # TODO complete Task class
         """
         parameters
@@ -90,6 +115,7 @@ class Task:
         type: it can be 1 or 2
         """
         self.type = type
+        self.deadline = deadline
         self.deadline_passed = False
         self.is_done = False
         self.arrival_time = arrival_time
@@ -100,18 +126,22 @@ class Task:
     def done(self):
         self.is_done = True
 
+    def start_service(self, service_time):
+        self.service_time = service_time
+        # TODO add task to tasks_done_time dictionary in simulation
+
 
 class Simulation:
     def __init__(self):
         """
-        tasks_deadline = {deadline_time: [task ids]}
-        tasks_done_time = {done_time: [task ids]}
+        tasks_deadline = {deadline_time: [task]}
+        tasks_done_time = {done_time: [task]}
         tasks = {task_id: Task object}
         """
         self.tasks_deadline = defaultdict(list)
         self.tasks_done_time = defaultdict(list)
         self.tasks_start_time = defaultdict(list)
-        self.tasks = {}
+        self.tasks = []
 
         self.finished = False
         self.time = 0
@@ -122,7 +152,6 @@ class Simulation:
         """
         self.process_servers = []
 
-        self.last_id = -1
         self.next_coming_task = 0
 
     def set_time_server(self, time_server):
@@ -150,14 +179,11 @@ class Simulation:
                 dt, type = self.generate_inter_arrival()
                 self.next_coming_task = self.time + dt
 
-                task_id = self.last_id + 1
-                self.last_id = task_id
-
                 deadline = self.time + self.generate_deadline()
-                self.tasks_deadline[deadline].append(task_id)
+                task = Task(type, self.time, deadline)
+                self.tasks_deadline[deadline].append(task)
 
-                task = Task(type, self.time)
-                self.tasks[task_id] = task
+                self.tasks.append(task)
                 self.time_server.add_task(task)
 
             # TODO check for deadlines
